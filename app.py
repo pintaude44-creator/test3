@@ -2,6 +2,18 @@ from flask import Flask, request, jsonify
 import smtplib
 from email.mime.text import MIMEText
 import os
+from flask_cors import CORS
+
+CORS(app, resources={
+    r"/send": {
+        "origins": [
+            "https://nsfuels.xyz",
+            "https://www.nsfuels.xyz",
+            "http://127.0.0.1:5500",
+            "http://localhost:5500"
+        ]
+    }
+})
 
 app = Flask(__name__)
 
@@ -43,3 +55,4 @@ def send_email():
 @app.route("/")
 def home():
     return "API do formulário funcionando!"
+
