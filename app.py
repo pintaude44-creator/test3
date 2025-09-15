@@ -73,3 +73,13 @@ Mensagem:
 if __name__ == "__main__":
     # modo local
     app.run(host="0.0.0.0", port=5000, debug=True)
+@app.post("/send")
+def send():
+    ...
+    # (função igual como está)
+
+# Aceita POST na raiz e delega para o mesmo handler:
+@app.route("/", methods=["POST", "OPTIONS"])
+def send_root():
+    return send()
+
