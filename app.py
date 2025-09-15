@@ -1,73 +1,75 @@
 import os
-import smtplib, ssl
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
+import smtplib
+import socket
 from flask import Flask, request, jsonify
 from flask_cors import CORS
+from email.mime.text import MIMEText
+from email.mime.multipart import MIMEMultipart
 
+# ------------ Config ------------
+SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
+SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
+SMTP_USER = os.getenv("comercial@nsfuels.xyz")               # ex: contato@nsfuels.xyz
+SMTP_PASS = os.getenv("3f:Ef$LYkBu")               # senha do email Hostinger
+TO_EMAIL  = os.getenv("comercial@nsfuels.xyz", SMTP_USER)     # pra onde enviar (pode ser o mesmo)
+ALLOW_ORIGIN = os.getenv("https://nsfuels.xyz/", "*")    # ex: https://nsfuels.xyz
+
+# ------------ App ------------
 app = Flask(__name__)
+CORS(app, resources={r"/*": {"origins": ALLOW_ORIGIN}})
 
-CORS(app, resources={
-    r"/send": {
-        "origins": [
-            "https://nsfuels.xyz",
-            "https://www.nsfuels.xyz",
-            "http://127.0.0.1:5500",
-            "http://localhost:5500"
-        ],
-        "supports_credentials": False,
-        "allow_headers": ["Content-Type"],
-        "methods": ["POST", "OPTIONS"]
-    }
-})
-
-EMAIL_USER = os.getenv("EMAIL_USER")          # seu Gmail (remetente)
-EMAIL_PASS = os.getenv("EMAIL_PASS")          # App Password do Gmail
-EMAIL_TO   = os.getenv("EMAIL_TO") or "pintaude44@gmail.com"  # destinatário
-
-@app.route("/", methods=["GET"])
+@app.get("/")
 def health():
     return "OK", 200
 
-@app.route("/send", methods=["POST","OPTIONS"])
+@app.post("/send")
 def send():
-    if request.method == "OPTIONS":
-        # preflight do CORS
-        return ("", 204)
+    # JSON obrigatório
+    if not request.is_json:
+        return jsonify(ok=False, error="JSON obrigatório"), 400
 
     data = request.get_json(silent=True) or {}
-    nome = data.get("nome", "").strip()
-    email = data.get("email", "").strip()
-    empresa = data.get("empresa", "").strip()
-    mensagem = data.get("mensagem", "").strip()
+    nome     = (data.get("nome") or "").strip()
+    empresa  = (data.get("empresa") or "").strip()
+    email    = (data.get("email") or "").strip()
+    mensagem = (data.get("mensagem") or "").strip()
 
-    if not (nome and email and mensagem):
-        return jsonify({"ok": False, "error": "Campos obrigatórios ausentes."}), 400
+    # validação mínima
+    if not nome or not email or not mensagem:
+        return jsonify(ok=False, error="Preencha nome, e-mail e mensagem."), 400
 
     try:
-        msg = MIMEMultipart("alternative")
-        msg["Subject"] = f"[NSFuels] Contato de {nome}"
-        msg["From"] = EMAIL_USER
-        msg["To"] = EMAIL_TO
+        # Monta e-mail (texto + Reply-To do visitante)
+        subject = f"[Site] Contato - {nome}" + (f" ({empresa})" if empresa else "")
+        body = f"""\
+Nome: {nome}
+E-mail: {email}
+Empresa: {empresa}
 
-        html = f"""
-        <h2>Novo contato pelo site</h2>
-        <p><b>Nome:</b> {nome}</p>
-        <p><b>E-mail:</b> {email}</p>
-        <p><b>Empresa:</b> {empresa}</p>
-        <p><b>Mensagem:</b><br>{mensagem.replace('\n','<br>')}</p>
-        """
-        msg.attach(MIMEText(html, "html"))
+Mensagem:
+{mensagem}
+"""
 
-        context = ssl.create_default_context()
-        with smtplib.SMTP_SSL("smtp.gmail.com", 465, context=context) as server:
-            server.login(EMAIL_USER, EMAIL_PASS)
-            server.sendmail(EMAIL_USER, EMAIL_TO, msg.as_string())
+        msg = MIMEMultipart()
+        msg["From"] = SMTP_USER
+        msg["To"]   = TO_EMAIL
+        msg["Subject"] = subject
+        msg["Reply-To"] = email
+        msg.attach(MIMEText(body, "plain", "utf-8"))
 
-        return jsonify({"ok": True}), 200
+        # Envia via SMTP SSL
+        socket.setdefaulttimeout(15)
+        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
+            server.login(SMTP_USER, SMTP_PASS)
+            server.sendmail(SMTP_USER, [TO_EMAIL], msg.as_string())
+
+        return jsonify(ok=True, message="Enviado com sucesso.")
 
     except Exception as e:
-        return jsonify({"ok": False, "error": str(e)}), 500
+        # Não vaze segredos; retorno enxuto
+        return jsonify(ok=False, error="Falha ao enviar."), 500
+
 
 if __name__ == "__main__":
-    app.run(host="0.0.0.0", port=int(os.getenv("PORT", 10000)))
+    # modo local
+    app.run(host="0.0.0.0", port=5000, debug=True)
