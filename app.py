@@ -7,7 +7,7 @@ from flask_cors import CORS
 
 app = Flask(__name__)
 
-# CORS
+# CORS (permite seu site)
 ALLOW_ORIGIN = os.getenv("ALLOW_ORIGIN", "*")
 CORS(app, resources={r"/*": {"origins": ALLOW_ORIGIN}})
 
@@ -61,14 +61,13 @@ Mensagem:
             s.send_message(msg)
         return jsonify(ok=True), 200
     except Exception as e:
-        # Retorna o erro para facilitar debug inicial.
         return jsonify(ok=False, error=str(e)), 500
 
 @app.post("/send")
 def send_mail():
     return handle_send()
 
-# Alias: aceita POST na raiz sem conflitar o endpoint
+# Alias: aceita POST na raiz (se precisar)
 @app.route("/", methods=["POST", "OPTIONS"], endpoint="send_root")
 def send_root():
     if request.method == "OPTIONS":
@@ -76,4 +75,5 @@ def send_root():
     return handle_send()
 
 if __name__ == "__main__":
+    # Render injeta PORT; se local, usa 10000
     app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
