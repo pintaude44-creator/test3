@@ -1,48 +1,45 @@
 import os
+import ssl
 import smtplib
-import socket
+from email.message import EmailMessage
 from flask import Flask, request, jsonify
 from flask_cors import CORS
-from email.mime.text import MIMEText
-from email.mime.multipart import MIMEMultipart
 
-# ------------ Config ------------
-SMTP_HOST = os.getenv("SMTP_HOST", "smtp.hostinger.com")
-SMTP_PORT = int(os.getenv("SMTP_PORT", "465"))
-SMTP_USER = os.getenv("comercial@nsfuels.xyz")               # ex: contato@nsfuels.xyz
-SMTP_PASS = os.getenv("3f:Ef$LYkBu")               # senha do email Hostinger
-TO_EMAIL  = os.getenv("comercial@nsfuels.xyz", SMTP_USER)     # pra onde enviar (pode ser o mesmo)
-ALLOW_ORIGIN = os.getenv("https://nsfuels.xyz/", "*")    # ex: https://nsfuels.xyz
-
-# ------------ App ------------
 app = Flask(__name__)
+
+# CORS
+ALLOW_ORIGIN = os.getenv("ALLOW_ORIGIN", "*")
 CORS(app, resources={r"/*": {"origins": ALLOW_ORIGIN}})
 
 @app.get("/")
 def health():
     return "OK", 200
 
-@app.post("/send")
-def send():
-    # JSON obrigatório
-    if not request.is_json:
-        return jsonify(ok=False, error="JSON obrigatório"), 400
-
+def handle_send():
     data = request.get_json(silent=True) or {}
+
     nome     = (data.get("nome") or "").strip()
-    empresa  = (data.get("empresa") or "").strip()
     email    = (data.get("email") or "").strip()
+    empresa  = (data.get("empresa") or "").strip()
     mensagem = (data.get("mensagem") or "").strip()
 
-    # validação mínima
-    if not nome or not email or not mensagem:
-        return jsonify(ok=False, error="Preencha nome, e-mail e mensagem."), 400
+    if not nome or not email:
+        return jsonify(ok=False, error="nome e email são obrigatórios"), 400
 
-    try:
-        # Monta e-mail (texto + Reply-To do visitante)
-        subject = f"[Site] Contato - {nome}" + (f" ({empresa})" if empresa else "")
-        body = f"""\
-Nome: {nome}
+    # SMTP (Hostinger)
+    smtp_host = os.getenv("SMTP_HOST", "smtp.hostinger.com")
+    smtp_port = int(os.getenv("SMTP_PORT", "465"))
+    smtp_user = os.getenv("SMTP_USER") or os.getenv("EMAIL_USER")
+    smtp_pass = os.getenv("SMTP_PASS") or os.getenv("EMAIL_PASS")
+
+    mail_from = os.getenv("MAIL_FROM") or os.getenv("SENDER") or smtp_user
+    mail_to   = os.getenv("MAIL_TO")   or os.getenv("RECIPIENT") or smtp_user
+
+    if not smtp_user or not smtp_pass:
+        return jsonify(ok=False, error="Credenciais SMTP ausentes"), 500
+
+    subject = f"[Site NSFuels] Contato — {nome}"
+    body = f"""Nome: {nome}
 E-mail: {email}
 Empresa: {empresa}
 
@@ -50,36 +47,33 @@ Mensagem:
 {mensagem}
 """
 
-        msg = MIMEMultipart()
-        msg["From"] = SMTP_USER
-        msg["To"]   = TO_EMAIL
-        msg["Subject"] = subject
-        msg["Reply-To"] = email
-        msg.attach(MIMEText(body, "plain", "utf-8"))
+    msg = EmailMessage()
+    msg["From"] = mail_from
+    msg["To"] = mail_to
+    msg["Subject"] = subject
+    msg["Reply-To"] = email
+    msg.set_content(body)
 
-        # Envia via SMTP SSL
-        socket.setdefaulttimeout(15)
-        with smtplib.SMTP_SSL(SMTP_HOST, SMTP_PORT) as server:
-            server.login(SMTP_USER, SMTP_PASS)
-            server.sendmail(SMTP_USER, [TO_EMAIL], msg.as_string())
-
-        return jsonify(ok=True, message="Enviado com sucesso.")
-
+    try:
+        ctx = ssl.create_default_context()
+        with smtplib.SMTP_SSL(smtp_host, smtp_port, context=ctx) as s:
+            s.login(smtp_user, smtp_pass)
+            s.send_message(msg)
+        return jsonify(ok=True), 200
     except Exception as e:
-        # Não vaze segredos; retorno enxuto
-        return jsonify(ok=False, error="Falha ao enviar."), 500
+        # Retorna o erro para facilitar debug inicial.
+        return jsonify(ok=False, error=str(e)), 500
 
+@app.post("/send")
+def send_mail():
+    return handle_send()
+
+# Alias: aceita POST na raiz sem conflitar o endpoint
+@app.route("/", methods=["POST", "OPTIONS"], endpoint="send_root")
+def send_root():
+    if request.method == "OPTIONS":
+        return "", 200
+    return handle_send()
 
 if __name__ == "__main__":
-    # modo local
-    app.run(host="0.0.0.0", port=5000, debug=True)
-@app.post("/send")
-def send():
-    ...
-    # (função igual como está)
-
-# Aceita POST na raiz e delega para o mesmo handler:
-@app.route("/", methods=["POST", "OPTIONS"])
-def send_root():
-    return send()
-
+    app.run(host="0.0.0.0", port=int(os.getenv("PORT", "10000")))
